@@ -3179,10 +3179,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         self.commandPalette = palette
         registerGlobalHotkey()
 
-        // A normal launch from Finder/Applications should be useful immediately,
-        // while the global hotkey continues to toggle the same palette.
+        // Normal app launches use the full main window. The compact command
+        // palette is reserved for the explicit Option-Space shortcut.
         DispatchQueue.main.async { [weak self] in
-            self?.presentPalette()
+            self?.presentMainWindow()
         }
         
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -3204,14 +3204,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         NSLog("Smart Stack reopen requested (had visible windows: \(flag))")
-        presentPalette()
+        presentMainWindow()
         return true
-    }
-
-    func applicationDidBecomeActive(_ notification: Notification) {
-        if commandPalette?.isVisible == false {
-            presentPalette()
-        }
     }
 
     private func registerGlobalHotkey() {
@@ -3286,6 +3280,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog(
             "Presented Smart Stack palette " +
             "(visible: \(palette.isVisible), key: \(palette.isKeyWindow), frame: \(NSStringFromRect(palette.frame)))"
+        )
+    }
+
+    private func presentMainWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+
+        let mainWindow = NSApp.windows.first(where: { window in
+            window !== commandPalette && window.canBecomeMain
+        })
+
+        guard let mainWindow else {
+            NSLog("Main Smart Stack window is still being created")
+            return
+        }
+
+        mainWindow.makeKeyAndOrderFront(nil)
+        NSLog(
+            "Presented main Smart Stack window " +
+            "(visible: \(mainWindow.isVisible), key: \(mainWindow.isKeyWindow))"
         )
     }
     
