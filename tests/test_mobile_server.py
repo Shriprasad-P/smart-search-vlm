@@ -25,7 +25,7 @@ class MobileServerTests(unittest.TestCase):
         (self.static_dir / "app.css").write_text("", encoding="utf-8")
         (self.static_dir / "app.js").write_text("", encoding="utf-8")
         self.image = root / "photo.jpg"
-        self.image.write_bytes(b"image-bytes")
+        self.image.write_bytes(self.jpeg_bytes((1200, 600)))
         self.cfg = StackConfig(
             stack_root=root,
             vault_root=root,
@@ -124,9 +124,9 @@ class MobileServerTests(unittest.TestCase):
             return response.status, json.loads(response.read())
 
     @staticmethod
-    def jpeg_bytes():
+    def jpeg_bytes(size=(12, 8)):
         buffer = io.BytesIO()
-        Image.new("RGB", (12, 8), color=(40, 120, 200)).save(buffer, format="JPEG")
+        Image.new("RGB", size, color=(40, 120, 200)).save(buffer, format="JPEG")
         return buffer.getvalue()
 
     def test_health_photos_and_indexed_image(self):
@@ -137,9 +137,15 @@ class MobileServerTests(unittest.TestCase):
 
         _, _, body = self.get("/api/photos?limit=30")
         self.assertEqual(json.loads(body)["items"][0]["image_id"], "photo-1")
-        _, headers, body = self.get("/api/image/photo-1")
+        _, headers, body = self.get("/api/image/photo-1?size=thumb")
         self.assertEqual(headers["Content-Type"], "image/jpeg")
-        self.assertEqual(body, b"image-bytes")
+        with Image.open(io.BytesIO(body)) as preview:
+            self.assertLessEqual(max(preview.size), 560)
+            self.assertEqual(preview.format, "JPEG")
+
+        _, _, body = self.get("/api/image/photo-1?size=full")
+        with Image.open(io.BytesIO(body)) as preview:
+            self.assertEqual(preview.size, (1200, 600))
 
     def test_search_and_chat_delegate_to_existing_api_contract(self):
         status, body = self.post("/api/search", {"query": "mountain", "top_k": 999})
@@ -156,6 +162,18 @@ class MobileServerTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as caught:
             self.get("/api/image/../../etc/passwd")
         self.assertEqual(caught.exception.code, 404)
+
+    def test_normalized_preview_survives_missing_original(self):
+        self.cfg.preprocessed_dir.mkdir(parents=True, exist_ok=True)
+        cached = self.cfg.preprocessed_dir / "hash-photo-1.jpg"
+        cached.write_bytes(self.jpeg_bytes((640, 320)))
+        self.image.unlink()
+
+        status, headers, body = self.get("/api/image/photo-1?size=thumb")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "image/jpeg")
+        with Image.open(io.BytesIO(body)) as preview:
+            self.assertEqual(preview.size, (640, 320))
 
     def test_gallery_upload_is_validated_saved_and_sent_to_ingestion(self):
         status, body = self.post_multipart(

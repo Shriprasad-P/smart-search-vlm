@@ -51,9 +51,13 @@ nav { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; background
 .note { color: var(--muted); font-size: 12px; margin: 9px 2px 14px; }
 
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
-.card { overflow: hidden; min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 15px; }
+.card { overflow: hidden; min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 15px; cursor: pointer; transition: transform .15s ease, border-color .15s ease; }
+.card:active { transform: scale(.985); }
+.card:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
 .image-wrap { aspect-ratio: 1.15; background: var(--panel-2); overflow: hidden; }
 .image-wrap img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.image-wrap.image-missing { display: grid; place-content: center; color: var(--muted); font-size: 11px; text-align: center; padding: 12px; }
+.image-wrap.image-missing::after { content: "Preview unavailable"; }
 .card-body { padding: 11px; }
 .caption { margin: 0; font-size: 13px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .tags { display: flex; gap: 5px; overflow: hidden; margin: 9px 0; }
@@ -81,6 +85,21 @@ nav { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; background
 .upload-button span { font-size: 17px; font-weight: 760; }
 .upload-button small { color: var(--muted); font-size: 11px; }
 .ingest-status { margin: 14px 0; padding: 12px 14px; color: var(--accent); background: rgba(112,225,178,.09); border: 1px solid rgba(112,225,178,.22); border-radius: 12px; font-size: 13px; }
+
+.photo-modal { width: min(94vw, 900px); max-width: 900px; max-height: 92dvh; margin: auto; padding: 0; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 20px; overflow: hidden; box-shadow: 0 28px 90px rgba(0,0,0,.65); }
+.photo-modal::backdrop { background: rgba(3,5,8,.84); backdrop-filter: blur(8px); }
+.modal-close { position: absolute; z-index: 2; top: 10px; right: 10px; width: 38px; height: 38px; padding: 0; color: var(--text); background: rgba(10,12,16,.72); border: 1px solid rgba(255,255,255,.18); border-radius: 50%; font-size: 25px; line-height: 1; }
+.modal-image-stage { min-height: 220px; max-height: 58dvh; display: grid; place-items: center; overflow: auto; background: #050608; }
+.modal-photo { display: block; width: 100%; max-height: 58dvh; object-fit: contain; cursor: zoom-in; transition: width .18s ease; }
+.modal-photo.zoomed { width: 180%; max-width: none; max-height: none; cursor: zoom-out; }
+.modal-image-error { padding: 30px; color: var(--muted); text-align: center; }
+.modal-content { padding: 18px; overflow-y: auto; }
+.modal-content h2 { margin: 5px 0 9px; font-size: clamp(19px, 5vw, 26px); line-height: 1.25; }
+.modal-summary { margin: 0 0 13px; color: #cbd3df; font-size: 14px; line-height: 1.55; white-space: pre-wrap; }
+.modal-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.modal-tags .tag { font-size: 11px; padding: 5px 9px; }
+.modal-date { margin: 10px 0 14px; color: var(--muted); font-size: 11px; }
+.modal-ask { width: 100%; padding: 12px; color: #07110e; background: var(--accent); border: 0; border-radius: 12px; font-weight: 760; }
 
 .busy { position: fixed; inset: 0; z-index: 20; display: grid; place-content: center; text-align: center; background: rgba(5,7,10,.76); backdrop-filter: blur(5px); }
 .busy span { width: 38px; height: 38px; margin: auto; border: 3px solid rgba(255,255,255,.18); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }

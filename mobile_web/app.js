@@ -1,6 +1,35 @@
 const state = { photoOffset: 0, photoTotal: 0, history: [], attachedImageId: "" };
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
+const imageQueue = [];
+let activeImageLoads = 0;
+const maxConcurrentImageLoads = 4;
+
+function pumpImageQueue() {
+  while (activeImageLoads < maxConcurrentImageLoads && imageQueue.length) {
+    const task = imageQueue.shift();
+    if (!task.img.isConnected) continue;
+    activeImageLoads += 1;
+    let finished = false;
+    const finish = (failed) => {
+      if (finished) return;
+      finished = true;
+      activeImageLoads -= 1;
+      if (failed && task.onError) task.onError();
+      pumpImageQueue();
+    };
+    task.img.addEventListener("load", () => finish(false), { once: true });
+    task.img.addEventListener("error", () => finish(true), { once: true });
+    task.img.src = task.url;
+  }
+}
+
+function queueImage(img, url, onError = null) {
+  imageQueue.push({ img, url, onError });
+  // Cards are assembled before they are attached to the document. Defer the
+  // connectivity check until the current render pass has appended them.
+  window.setTimeout(pumpImageQueue, 0);
+}
 
 function busy(on, message = "Working on your Mac…") {
   $("#busy-message").textContent = message;
@@ -25,14 +54,56 @@ function showView(name) {
   $$(".view").forEach((el) => el.classList.toggle("active", el.id === `${name}-view`));
 }
 
-function imageUrl(item) { return `/api/image/${encodeURIComponent(item.image_id)}`; }
+function imageUrl(item, size = "thumb") {
+  return `/api/image/${encodeURIComponent(item.image_id)}?size=${encodeURIComponent(size)}`;
+}
+
+let modalItem = null;
+
+function openPhoto(item) {
+  modalItem = item;
+  const modal = $("#photo-modal");
+  const img = $("#modal-image");
+  img.classList.remove("zoomed", "hidden");
+  $("#modal-image-error").classList.add("hidden");
+  img.src = imageUrl(item, "full");
+  img.alt = item.caption || "Indexed image";
+  $("#modal-caption").textContent = item.caption || "Untitled image";
+  $("#modal-summary").textContent = item.summary || "No additional summary is available.";
+  const tagBox = $("#modal-tags");
+  tagBox.replaceChildren();
+  const tags = Array.isArray(item.tags) ? item.tags : [];
+  tags.forEach((text) => {
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = text;
+    tagBox.append(tag);
+  });
+  const created = item.created_at ? new Date(item.created_at) : null;
+  $("#modal-date").textContent = created && !Number.isNaN(created.valueOf())
+    ? `Indexed ${created.toLocaleString()}` : "";
+  if (typeof modal.showModal === "function") modal.showModal();
+  else modal.setAttribute("open", "");
+}
+
+function closePhoto() {
+  const modal = $("#photo-modal");
+  if (typeof modal.close === "function") modal.close();
+  else modal.removeAttribute("open");
+  $("#modal-image").src = "";
+  modalItem = null;
+}
 
 function card(item) {
   const node = $("#card-template").content.firstElementChild.cloneNode(true);
+  node.tabIndex = 0;
+  node.setAttribute("aria-label", `Open details for ${item.caption || "indexed image"}`);
   const img = node.querySelector("img");
-  img.src = imageUrl(item);
   img.alt = item.caption || "Indexed photo";
-  img.addEventListener("error", () => { img.style.opacity = ".18"; });
+  queueImage(img, imageUrl(item, "thumb"), () => {
+    img.remove();
+    node.querySelector(".image-wrap").classList.add("image-missing");
+  });
   node.querySelector(".caption").textContent = item.caption || item.summary || "Untitled photo";
   const tags = Array.isArray(item.tags) ? item.tags.slice(0, 3) : [];
   const tagBox = node.querySelector(".tags");
@@ -42,7 +113,19 @@ function card(item) {
     tag.textContent = text;
     tagBox.append(tag);
   });
-  node.querySelector(".ask-photo").addEventListener("click", () => attachPhoto(item));
+  node.addEventListener("click", (event) => {
+    if (!event.target.closest("button")) openPhoto(item);
+  });
+  node.addEventListener("keydown", (event) => {
+    if ((event.key === "Enter" || event.key === " ") && event.target === node) {
+      event.preventDefault();
+      openPhoto(item);
+    }
+  });
+  node.querySelector(".ask-photo").addEventListener("click", (event) => {
+    event.stopPropagation();
+    attachPhoto(item);
+  });
   return node;
 }
 
@@ -93,8 +176,9 @@ function addMessage(role, text, sources = []) {
       if (!source.image_id) return;
       const img = document.createElement("img");
       img.className = "source-thumb";
-      img.src = imageUrl(source);
       img.alt = source.caption || "Source photo";
+      queueImage(img, imageUrl(source, "thumb"));
+      img.addEventListener("click", () => openPhoto(source));
       sourceBox.append(img);
     });
     message.append(sourceBox);
@@ -205,5 +289,22 @@ $("#camera-input").addEventListener("change", (event) => {
 });
 $("#gallery-input").addEventListener("change", (event) => {
   uploadImages(event.target.files, "gallery").finally(() => { event.target.value = ""; });
+});
+$("#modal-close").addEventListener("click", closePhoto);
+$("#photo-modal").addEventListener("click", (event) => {
+  if (event.target === $("#photo-modal")) closePhoto();
+});
+$("#modal-image").addEventListener("click", (event) => {
+  event.currentTarget.classList.toggle("zoomed");
+});
+$("#modal-image").addEventListener("error", () => {
+  $("#modal-image").classList.add("hidden");
+  $("#modal-image-error").classList.remove("hidden");
+});
+$("#modal-ask").addEventListener("click", () => {
+  if (!modalItem) return;
+  const selected = modalItem;
+  closePhoto();
+  attachPhoto(selected);
 });
 health();

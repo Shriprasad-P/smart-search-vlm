@@ -11,7 +11,6 @@ import argparse
 import io
 import json
 import logging
-import mimetypes
 import re
 import threading
 import time
@@ -71,6 +70,7 @@ class MobileApp:
         self.ingest_fn = ingest_fn
         # MLX/PyTorch model loads are RAM-heavy. Keep inference requests serial.
         self.inference_lock = threading.Lock()
+        self.preview_lock = threading.Lock()
         self.started_at = time.time()
 
     @staticmethod
@@ -225,22 +225,75 @@ class MobileApp:
             cfg=self.cfg,
         )
 
-    def image_path(self, image_id: str) -> Path | None:
+    def image_preview_path(self, image_id: str, size: str = "thumb") -> Path | None:
         if not image_id or len(image_id) > 128:
             return None
         conn = connect_sqlite(self.cfg)
         ensure_schema(conn)
         try:
             row = conn.execute(
-                "SELECT file_path FROM images WHERE id = ? LIMIT 1",
+                "SELECT file_path, sha256_hash FROM images WHERE id = ? LIMIT 1",
                 (image_id,),
             ).fetchone()
         finally:
             conn.close()
         if row is None:
             return None
-        path = Path(str(row["file_path"] or ""))
-        return path if path.is_file() else None
+        original = Path(str(row["file_path"] or ""))
+        content_hash = str(row["sha256_hash"] or "").strip()
+        normalized = self.cfg.preprocessed_dir / f"{content_hash}.jpg"
+
+        preview_size = "full" if size == "full" else "thumb"
+        # Ingestion already creates a browser-safe normalized JPEG (max 1024px).
+        # Serving it directly avoids serial conversion stalls when the gallery
+        # requests many thumbnails at once, and survives a moved original.
+        if preview_size == "thumb" and normalized.is_file():
+            return normalized
+
+        source = original if original.is_file() else normalized
+        if not source.is_file():
+            return None
+        max_dimension = 1800 if preview_size == "full" else 560
+        quality = 90 if preview_size == "full" else 82
+        safe_id = re.sub(r"[^A-Za-z0-9_-]+", "-", image_id)[:128]
+        preview_dir = self.cfg.vault_root / ".mobile_previews"
+        preview_dir.mkdir(parents=True, exist_ok=True)
+        preview = preview_dir / f"{safe_id}-{preview_size}.jpg"
+
+        try:
+            source_mtime = source.stat().st_mtime_ns
+            if preview.is_file() and preview.stat().st_mtime_ns >= source_mtime:
+                return preview
+        except OSError:
+            return None
+
+        with self.preview_lock:
+            try:
+                if preview.is_file() and preview.stat().st_mtime_ns >= source_mtime:
+                    return preview
+                from PIL import Image, ImageOps
+
+                with Image.open(source) as opened:
+                    image = ImageOps.exif_transpose(opened)
+                    if image.mode != "RGB":
+                        image = image.convert("RGB")
+                    image.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+                    temporary = preview.with_suffix(".jpg.part")
+                    try:
+                        image.save(
+                            temporary,
+                            format="JPEG",
+                            quality=quality,
+                            optimize=True,
+                            progressive=True,
+                        )
+                        temporary.replace(preview)
+                    finally:
+                        temporary.unlink(missing_ok=True)
+                return preview
+            except Exception:
+                LOG.exception("Failed to create mobile preview for %s", source)
+                return None
 
     def run_search(self, payload: dict[str, Any]) -> dict[str, Any]:
         query = str(payload.get("query", "")).strip()
@@ -375,21 +428,22 @@ def make_handler(app: MobileApp, static_dir: Path) -> type[BaseHTTPRequestHandle
             self.end_headers()
             self.wfile.write(body)
 
-        def _image(self, image_id: str) -> None:
-            path = app.image_path(unquote(image_id))
+        def _image(self, image_id: str, query: dict[str, list[str]]) -> None:
+            requested_size = str((query.get("size") or ["thumb"])[0]).lower()
+            preview_size = "full" if requested_size == "full" else "thumb"
+            path = app.image_preview_path(unquote(image_id), preview_size)
             if path is None:
                 self._error(HTTPStatus.NOT_FOUND, "Image is missing from the index or disk.")
                 return
-            content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
             try:
-                size = path.stat().st_size
-                self.send_response(HTTPStatus.OK)
-                self._security_headers()
-                self.send_header("Content-Type", content_type)
-                self.send_header("Cache-Control", "private, max-age=300")
-                self.send_header("Content-Length", str(size))
-                self.end_headers()
                 with path.open("rb") as handle:
+                    size = path.stat().st_size
+                    self.send_response(HTTPStatus.OK)
+                    self._security_headers()
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Cache-Control", "private, max-age=86400")
+                    self.send_header("Content-Length", str(size))
+                    self.end_headers()
                     while chunk := handle.read(256 * 1024):
                         self.wfile.write(chunk)
             except (BrokenPipeError, ConnectionResetError):
@@ -417,7 +471,10 @@ def make_handler(app: MobileApp, static_dir: Path) -> type[BaseHTTPRequestHandle
                 elif parsed.path == "/api/photos":
                     self._json(HTTPStatus.OK, app.photos(parse_qs(parsed.query)))
                 elif parsed.path.startswith("/api/image/"):
-                    self._image(parsed.path.removeprefix("/api/image/"))
+                    self._image(
+                        parsed.path.removeprefix("/api/image/"),
+                        parse_qs(parsed.query),
+                    )
                 else:
                     self._error(HTTPStatus.NOT_FOUND, "Not found.")
             except Exception as exc:  # keep server alive during model/DB errors

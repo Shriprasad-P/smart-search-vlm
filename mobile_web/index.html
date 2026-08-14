@@ -71,6 +71,22 @@
     </section>
   </main>
 
+  <dialog id="photo-modal" class="photo-modal">
+    <button id="modal-close" class="modal-close" type="button" aria-label="Close image details">×</button>
+    <div class="modal-image-stage">
+      <img id="modal-image" class="modal-photo" alt="">
+      <p id="modal-image-error" class="modal-image-error hidden">This indexed image is no longer available on the Mac.</p>
+    </div>
+    <div class="modal-content">
+      <p class="eyebrow">IMAGE MEMORY</p>
+      <h2 id="modal-caption"></h2>
+      <p id="modal-summary" class="modal-summary"></p>
+      <div id="modal-tags" class="modal-tags"></div>
+      <p id="modal-date" class="modal-date"></p>
+      <button id="modal-ask" class="modal-ask" type="button">Ask about this image</button>
+    </div>
+  </dialog>
+
   <template id="card-template">
     <article class="card">
       <div class="image-wrap"><img loading="lazy" alt=""></div>
