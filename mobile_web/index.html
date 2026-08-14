@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0e14">
+  <title>Smart Stack</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">MULTIMODAL MEMORY</p>
+      <h1>Smart Stack</h1>
+    </div>
+    <span id="health" class="status">Connecting</span>
+  </header>
+
+  <main>
+    <nav aria-label="Main navigation">
+      <button class="tab active" data-view="search">Search</button>
+      <button class="tab" data-view="chat">Ask</button>
+      <button class="tab" data-view="photos">Photos</button>
+      <button class="tab" data-view="ingest">Add</button>
+    </nav>
+
+    <section id="search-view" class="view active">
+      <form id="search-form" class="query-box">
+        <input id="search-input" type="search" placeholder="Find a person, place, object…" maxlength="500" required>
+        <button type="submit">Search</button>
+      </form>
+      <p id="search-note" class="note">Hybrid keyword + semantic retrieval</p>
+      <div id="search-results" class="grid"></div>
+    </section>
+
+    <section id="chat-view" class="view">
+      <div id="attachment" class="attachment hidden"></div>
+      <div id="messages" class="messages">
+        <div class="message assistant">Ask a grounded question about your indexed photos.</div>
+      </div>
+      <form id="chat-form" class="query-box chat-box">
+        <input id="chat-input" type="text" placeholder="What do you remember about…?" maxlength="1000" required>
+        <button type="submit">Ask</button>
+      </form>
+    </section>
+
+    <section id="photos-view" class="view">
+      <div class="section-heading">
+        <div><h2>Indexed photos</h2><p id="photo-count" class="note"></p></div>
+        <button id="refresh-photos" class="secondary">Refresh</button>
+      </div>
+      <div id="photos" class="grid"></div>
+      <button id="load-more" class="wide secondary hidden">Load more</button>
+    </section>
+
+    <section id="ingest-view" class="view">
+      <div class="upload-hero">
+        <p class="eyebrow">ADD TO YOUR MEMORY</p>
+        <h2>Ingest from Android</h2>
+        <p class="upload-copy">Choose up to 10 gallery images at once, or capture a new photo with the rear camera. Smart Stack will run OCR, visual analysis, captions, and embeddings on your Mac.</p>
+        <div class="upload-actions">
+          <button id="camera-button" class="upload-button" type="button"><span>Camera</span><small>Take a new photo</small></button>
+          <button id="gallery-button" class="upload-button" type="button"><span>Gallery</span><small>Select up to 10</small></button>
+        </div>
+        <input id="camera-input" class="hidden" type="file" accept="image/*" capture="environment">
+        <input id="gallery-input" class="hidden" type="file" accept="image/*" multiple>
+        <p class="note">Maximum 25 MB per image · 80 MB per upload</p>
+      </div>
+      <div id="ingest-status" class="ingest-status hidden"></div>
+      <div id="ingest-results" class="grid"></div>
+    </section>
+  </main>
+
+  <dialog id="photo-modal" class="photo-modal">
+    <button id="modal-close" class="modal-close" type="button" aria-label="Close image details">×</button>
+    <div class="modal-image-stage">
+      <img id="modal-image" class="modal-photo" alt="">
+      <p id="modal-image-error" class="modal-image-error hidden">This indexed image is no longer available on the Mac.</p>
+    </div>
+    <div class="modal-content">
+      <p class="eyebrow">IMAGE MEMORY</p>
+      <h2 id="modal-caption"></h2>
+      <p id="modal-summary" class="modal-summary"></p>
+      <div id="modal-tags" class="modal-tags"></div>
+      <p id="modal-date" class="modal-date"></p>
+      <button id="modal-ask" class="modal-ask" type="button">Ask about this image</button>
+    </div>
+  </dialog>
+
+  <template id="card-template">
+    <article class="card">
+      <div class="image-wrap"><img loading="lazy" alt=""></div>
+      <div class="card-body">
+        <p class="caption"></p>
+        <div class="tags"></div>
+        <button class="ask-photo secondary">Ask about this</button>
+      </div>
+    </article>
+  </template>
+
+  <div id="busy" class="busy hidden" role="status"><span></span><p id="busy-message">Working on your Mac…</p></div>
+  <div id="toast" class="toast hidden" role="alert"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

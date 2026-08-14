@@ -91,6 +91,19 @@ Notes:
 - if your clone lives somewhere unusual, the launcher passes the correct repo root automatically
 - if you want a non-default data directory, set `SMART_STACK_VAULT_ROOT` before launching the app
 
+## Android Access With Tailscale
+
+Smart Stack includes a mobile web gateway for hybrid search, grounded chat,
+indexed-photo browsing, and gallery/camera image ingestion. It listens on localhost and uses
+Tailscale Serve for private tailnet-only HTTPS access:
+
+```bash
+./run_mobile_tailscale.sh
+```
+
+See [MOBILE_TAILSCALE_DEMO.md](MOBILE_TAILSCALE_DEMO.md) for Android setup,
+the demo checklist, troubleshooting, and shutdown steps.
+
 ## Run Ingestion
 
 1. Put images into `./inbox`
