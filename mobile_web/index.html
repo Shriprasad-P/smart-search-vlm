@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0e14">
+  <title>Smart Stack</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">MULTIMODAL MEMORY</p>
+      <h1>Smart Stack</h1>
+    </div>
+    <span id="health" class="status">Connecting</span>
+  </header>
+
+  <main>
+    <nav aria-label="Main navigation">
+      <button class="tab active" data-view="search">Search</button>
+      <button class="tab" data-view="chat">Ask</button>
+      <button class="tab" data-view="photos">Photos</button>
+    </nav>
+
+    <section id="search-view" class="view active">
+      <form id="search-form" class="query-box">
+        <input id="search-input" type="search" placeholder="Find a person, place, object…" maxlength="500" required>
+        <button type="submit">Search</button>
+      </form>
+      <p id="search-note" class="note">Hybrid keyword + semantic retrieval</p>
+      <div id="search-results" class="grid"></div>
+    </section>
+
+    <section id="chat-view" class="view">
+      <div id="attachment" class="attachment hidden"></div>
+      <div id="messages" class="messages">
+        <div class="message assistant">Ask a grounded question about your indexed photos.</div>
+      </div>
+      <form id="chat-form" class="query-box chat-box">
+        <input id="chat-input" type="text" placeholder="What do you remember about…?" maxlength="1000" required>
+        <button type="submit">Ask</button>
+      </form>
+    </section>
+
+    <section id="photos-view" class="view">
+      <div class="section-heading">
+        <div><h2>Indexed photos</h2><p id="photo-count" class="note"></p></div>
+        <button id="refresh-photos" class="secondary">Refresh</button>
+      </div>
+      <div id="photos" class="grid"></div>
+      <button id="load-more" class="wide secondary hidden">Load more</button>
+    </section>
+  </main>
+
+  <template id="card-template">
+    <article class="card">
+      <div class="image-wrap"><img loading="lazy" alt=""></div>
+      <div class="card-body">
+        <p class="caption"></p>
+        <div class="tags"></div>
+        <button class="ask-photo secondary">Ask about this</button>
+      </div>
+    </article>
+  </template>
+
+  <div id="busy" class="busy hidden" role="status"><span></span><p>Working on your Mac…</p></div>
+  <div id="toast" class="toast hidden" role="alert"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
