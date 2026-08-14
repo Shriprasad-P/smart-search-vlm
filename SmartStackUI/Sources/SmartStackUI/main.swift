@@ -337,6 +337,22 @@ final class SmartStackViewModel: ObservableObject {
         attachedChatImage != nil
     }
 
+    var hasSearchHistory: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !results.isEmpty
+            || hasVisualQueryImage
+            || !lastSearchQuery.isEmpty
+    }
+
+    var hasChatHistory: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !chatTurns.isEmpty
+            || !chatAnswer.isEmpty
+            || !chatSources.isEmpty
+            || !chatConfidence.isEmpty
+            || hasAttachedChatImage
+    }
+
     var attachedChatImageFilename: String {
         guard let attachedChatImage else { return "" }
         return attachedChatImage.filename
@@ -429,6 +445,14 @@ final class SmartStackViewModel: ObservableObject {
             appendLog("Cleared visual query image.")
         }
         visualQueryImagePath = ""
+    }
+
+    func clearSearchHistory() {
+        query = ""
+        results = []
+        visualQueryImagePath = ""
+        lastSearchQuery = ""
+        appendLog("Cleared search history and results.")
     }
 
     func pickVisualQueryImage() {
@@ -599,11 +623,33 @@ final class SmartStackViewModel: ObservableObject {
     }
 
     func clearChatConversation() {
+        query = ""
         chatTurns = []
         chatAnswer = ""
         chatSources = []
         chatConfidence = ""
-        appendLog("Cleared chat conversation.")
+        attachedChatImage = nil
+
+        let cacheDir = URL(fileURLWithPath: stackRoot).appendingPathComponent(".cache/chat")
+        let fileManager = FileManager.default
+        var removedFiles = 0
+        if let cachedFiles = try? fileManager.contentsOfDirectory(
+            at: cacheDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) {
+            for fileURL in cachedFiles
+            where fileURL.lastPathComponent.hasPrefix("history_") && fileURL.pathExtension == "json" {
+                do {
+                    try fileManager.removeItem(at: fileURL)
+                    removedFiles += 1
+                } catch {
+                    appendLog("Could not remove cached chat history: \(error.localizedDescription)")
+                }
+            }
+        }
+
+        appendLog("Cleared chat conversation and \(removedFiles) cached history file(s).")
     }
 
     func runChat() {
@@ -2816,6 +2862,7 @@ struct ContentView: View {
                 if vm.hasAttachedChatImage {
                     Button("Clear Attached Chat Image") { vm.clearAttachedChatImage() }
                 }
+                Button("Clear Search History") { vm.clearSearchHistory() }
                 Button("Clear Chat Conversation") { vm.clearChatConversation() }
 
                 Divider()
@@ -2920,90 +2967,124 @@ struct ContentView: View {
     }
 
     private var resultsSection: some View {
-        ScrollView {
-            MasonryGrid(items: vm.filteredResults, columns: 3) { item in
-                ResultCard(
-                    result: item,
-                    openAction: { vm.open(item) },
-                    contextAction: item.image_id == nil ? nil : { vm.runContextLens(for: item) },
-                    attachChatAction: { vm.attachImageForChat(item) }
-                )
-                .padding(.bottom, 12)
+        VStack(spacing: 10) {
+            HStack {
+                Text("Search Results")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    vm.clearSearchHistory()
+                } label: {
+                    Label("Clear Search", systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!vm.hasSearchHistory || vm.isBusy)
+                .help("Clear the current search, visual query, and results")
             }
-            .padding(.top, 10)
-            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: vm.filteredResults.count)
+
+            ScrollView {
+                MasonryGrid(items: vm.filteredResults, columns: 3) { item in
+                    ResultCard(
+                        result: item,
+                        openAction: { vm.open(item) },
+                        contextAction: item.image_id == nil ? nil : { vm.runContextLens(for: item) },
+                        attachChatAction: { vm.attachImageForChat(item) }
+                    )
+                    .padding(.bottom, 12)
+                }
+                .padding(.top, 10)
+                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: vm.filteredResults.count)
+            }
         }
     }
 
     private var chatSection: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                if !vm.chatTurns.isEmpty {
-                    ForEach(vm.chatTurns) { turn in
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Image(systemName: turn.role == .assistant ? "sparkles" : "person.fill")
-                                    .foregroundStyle(turn.role == .assistant ? .yellow : .blue)
-                                Text(turn.role == .assistant ? "Assistant" : "You")
-                                    .font(.headline)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                if turn.role == .assistant, let confidence = turn.confidence, !confidence.isEmpty {
-                                    Text(confidence)
-                                        .font(.caption)
-                                        .padding(4)
-                                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
-                                }
-                            }
+        VStack(spacing: 10) {
+            HStack {
+                Text("Chat History")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    vm.clearChatConversation()
+                } label: {
+                    Label("Clear Chat", systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!vm.hasChatHistory || vm.isBusy)
+                .help("Clear the conversation, attachment, and temporary chat history")
+            }
 
-                            Text(turn.content)
-                                .font(.system(size: 16, weight: .regular, design: .rounded))
-                                .lineSpacing(4)
-                                .foregroundStyle(.primary)
-                                .textSelection(.enabled)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    if !vm.chatTurns.isEmpty {
+                        ForEach(vm.chatTurns) { turn in
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Image(systemName: turn.role == .assistant ? "sparkles" : "person.fill")
+                                        .foregroundStyle(turn.role == .assistant ? .yellow : .blue)
+                                    Text(turn.role == .assistant ? "Assistant" : "You")
+                                        .font(.headline)
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    if turn.role == .assistant, let confidence = turn.confidence, !confidence.isEmpty {
+                                        Text(confidence)
+                                            .font(.caption)
+                                            .padding(4)
+                                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
+                                    }
+                                }
+
+                                Text(turn.content)
+                                    .font(.system(size: 16, weight: .regular, design: .rounded))
+                                    .lineSpacing(4)
+                                    .foregroundStyle(.primary)
+                                    .textSelection(.enabled)
+                            }
+                            .padding(20)
+                            .background(.thinMaterial)
+                            .cornerRadius(16)
+                        }
+
+                        if !vm.chatSources.isEmpty {
+                            Text("Latest Sources")
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+                                .padding(.leading, 4)
+
+                            MasonryGrid(items: vm.chatSources, columns: 3) { item in
+                                ResultCard(
+                                    result: item,
+                                    openAction: { vm.open(item) },
+                                    contextAction: item.image_id == nil ? nil : { vm.runContextLens(for: item) },
+                                    attachChatAction: { vm.attachImageForChat(item) }
+                                )
+                                .padding(.bottom, 12)
+                            }
+                        }
+                    } else if vm.isBusy {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Rectangle().fill(.white.opacity(0.1)).frame(height: 20).cornerRadius(4)
+                            Rectangle().fill(.white.opacity(0.1)).frame(height: 20).cornerRadius(4)
+                            Rectangle().fill(.white.opacity(0.1)).frame(width: 200, height: 20).cornerRadius(4)
                         }
                         .padding(20)
-                        .background(.thinMaterial)
-                        .cornerRadius(16)
-                    }
-
-                    if !vm.chatSources.isEmpty {
-                        Text("Latest Sources")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                            .padding(.leading, 4)
-
-                        MasonryGrid(items: vm.chatSources, columns: 3) { item in
-                            ResultCard(
-                                result: item,
-                                openAction: { vm.open(item) },
-                                contextAction: item.image_id == nil ? nil : { vm.runContextLens(for: item) },
-                                attachChatAction: { vm.attachImageForChat(item) }
-                            )
-                            .padding(.bottom, 12)
+                    } else {
+                        VStack(spacing: 20) {
+                            Image(systemName: "message.badge.waveform")
+                                .font(.system(size: 48))
+                                .foregroundStyle(.secondary.opacity(0.5))
+                            Text("Start a continuous chat over your retrieved images.")
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
                         }
+                        .frame(maxWidth: .infinity, minHeight: 300)
                     }
-                } else if vm.isBusy {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Rectangle().fill(.white.opacity(0.1)).frame(height: 20).cornerRadius(4)
-                        Rectangle().fill(.white.opacity(0.1)).frame(height: 20).cornerRadius(4)
-                        Rectangle().fill(.white.opacity(0.1)).frame(width: 200, height: 20).cornerRadius(4)
-                    }
-                    .padding(20)
-                } else {
-                    VStack(spacing: 20) {
-                        Image(systemName: "message.badge.waveform")
-                            .font(.system(size: 48))
-                            .foregroundStyle(.secondary.opacity(0.5))
-                        Text("Start a continuous chat over your retrieved images.")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 300)
                 }
+                .padding(.top, 10)
+                .animation(.spring(response: 0.4), value: vm.chatTurns.count)
             }
-            .padding(.top, 10)
-            .animation(.spring(response: 0.4), value: vm.chatTurns.count)
         }
     }
     
@@ -3152,14 +3233,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let hotKeyID = EventHotKeyID(signature: OSType(0x5353544B), id: 1) // "SSTK"
-        RegisterEventHotKey(
+        let registrationStatus = RegisterEventHotKey(
             UInt32(kVK_Space),
-            UInt32(cmdKey | shiftKey),
+            UInt32(optionKey),
             hotKeyID,
             GetApplicationEventTarget(),
             0,
             &hotKeyRef
         )
+        if registrationStatus != noErr {
+            NSLog("Unable to register the global Option-Space shortcut (status: \(registrationStatus))")
+        } else {
+            NSLog("Registered global Option-Space shortcut")
+        }
     }
 
     private func unregisterGlobalHotkey() {

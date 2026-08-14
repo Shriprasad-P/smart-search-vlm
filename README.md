@@ -287,6 +287,7 @@ A local UI wrapper has been added at:
 It supports:
 
 - semantic and keyword image search
+- global `Option+Space` shortcut to open or dismiss the Smart Stack search palette
 - source/score filters
 - one-click `Ingest Inbox`, `Safe Reprocess`, and `Index Notes`
 - opening result files directly
