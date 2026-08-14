@@ -3176,6 +3176,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         palette.contentViewController = hostingController
         self.commandPalette = palette
         registerGlobalHotkey()
+
+        // A normal launch from Finder/Applications should be useful immediately,
+        // while the global hotkey continues to toggle the same palette.
+        DispatchQueue.main.async { [weak self] in
+            self?.presentPalette()
+        }
         
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53, let palette = self.commandPalette, palette.isVisible {
@@ -3192,6 +3198,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        presentPalette()
+        return true
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        if commandPalette?.isVisible == false {
+            presentPalette()
+        }
     }
 
     private func registerGlobalHotkey() {
@@ -3258,14 +3275,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             hotKeyHandlerRef = nil
         }
     }
+
+    private func presentPalette() {
+        guard let palette = commandPalette else { return }
+        palette.presentOverlay()
+        NSApp.activate(ignoringOtherApps: true)
+    }
     
     @objc func togglePalette() {
         guard let palette = commandPalette else { return }
         if palette.isVisible {
             palette.dismissOverlay()
         } else {
-            palette.presentOverlay()
-            NSApp.activate(ignoringOtherApps: true)
+            presentPalette()
         }
     }
 }
