@@ -21,6 +21,7 @@
       <button class="tab active" data-view="search">Search</button>
       <button class="tab" data-view="chat">Ask</button>
       <button class="tab" data-view="photos">Photos</button>
+      <button class="tab" data-view="ingest">Add</button>
     </nav>
 
     <section id="search-view" class="view active">
@@ -51,6 +52,23 @@
       <div id="photos" class="grid"></div>
       <button id="load-more" class="wide secondary hidden">Load more</button>
     </section>
+
+    <section id="ingest-view" class="view">
+      <div class="upload-hero">
+        <p class="eyebrow">ADD TO YOUR MEMORY</p>
+        <h2>Ingest from Android</h2>
+        <p class="upload-copy">Choose up to 10 gallery images at once, or capture a new photo with the rear camera. Smart Stack will run OCR, visual analysis, captions, and embeddings on your Mac.</p>
+        <div class="upload-actions">
+          <button id="camera-button" class="upload-button" type="button"><span>Camera</span><small>Take a new photo</small></button>
+          <button id="gallery-button" class="upload-button" type="button"><span>Gallery</span><small>Select up to 10</small></button>
+        </div>
+        <input id="camera-input" class="hidden" type="file" accept="image/*" capture="environment">
+        <input id="gallery-input" class="hidden" type="file" accept="image/*" multiple>
+        <p class="note">Maximum 25 MB per image · 80 MB per upload</p>
+      </div>
+      <div id="ingest-status" class="ingest-status hidden"></div>
+      <div id="ingest-results" class="grid"></div>
+    </section>
   </main>
 
   <template id="card-template">
@@ -64,7 +82,7 @@
     </article>
   </template>
 
-  <div id="busy" class="busy hidden" role="status"><span></span><p>Working on your Mac…</p></div>
+  <div id="busy" class="busy hidden" role="status"><span></span><p id="busy-message">Working on your Mac…</p></div>
   <div id="toast" class="toast hidden" role="alert"></div>
   <script src="/app.js" defer></script>
 </body>

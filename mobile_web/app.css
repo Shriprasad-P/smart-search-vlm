@@ -38,7 +38,7 @@ h2 { margin: 0; font-size: 18px; }
 .status.ok::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-right: 6px; box-shadow: 0 0 10px var(--accent); }
 
 main { max-width: 1100px; margin: auto; padding: 0 16px calc(35px + env(safe-area-inset-bottom)); }
-nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; background: var(--panel); padding: 5px; border: 1px solid var(--line); border-radius: 14px; position: sticky; top: 8px; z-index: 5; backdrop-filter: blur(16px); }
+nav { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; background: var(--panel); padding: 5px; border: 1px solid var(--line); border-radius: 14px; position: sticky; top: 8px; z-index: 5; backdrop-filter: blur(16px); }
 .tab { border: 0; padding: 10px; border-radius: 10px; color: var(--muted); background: transparent; font-weight: 650; }
 .tab.active { color: var(--text); background: var(--panel-2); box-shadow: 0 5px 18px rgba(0,0,0,.22); }
 .view { display: none; padding-top: 18px; }
@@ -71,6 +71,16 @@ nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; background
 .source-thumb { flex: 0 0 58px; width: 58px; height: 58px; object-fit: cover; border-radius: 9px; background: var(--panel-2); }
 .chat-box { position: sticky; bottom: calc(8px + env(safe-area-inset-bottom)); padding: 8px; margin: 0 -8px; border-radius: 15px; background: rgba(11,14,20,.88); backdrop-filter: blur(14px); }
 .attachment { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--accent); background: rgba(112,225,178,.09); border: 1px solid rgba(112,225,178,.22); border-radius: 11px; padding: 8px 10px; margin-bottom: 12px; font-size: 12px; }
+
+.upload-hero { padding: 22px 18px; background: linear-gradient(145deg, rgba(119,168,255,.12), rgba(112,225,178,.08)); border: 1px solid var(--line); border-radius: 18px; }
+.upload-hero h2 { margin-top: 5px; font-size: 24px; letter-spacing: -.03em; }
+.upload-copy { margin: 10px 0 18px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.upload-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.upload-button { min-height: 104px; display: flex; flex-direction: column; align-items: start; justify-content: end; gap: 4px; padding: 15px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; text-align: left; }
+.upload-button:first-child { background: linear-gradient(145deg, rgba(112,225,178,.22), var(--panel)); border-color: rgba(112,225,178,.3); }
+.upload-button span { font-size: 17px; font-weight: 760; }
+.upload-button small { color: var(--muted); font-size: 11px; }
+.ingest-status { margin: 14px 0; padding: 12px 14px; color: var(--accent); background: rgba(112,225,178,.09); border: 1px solid rgba(112,225,178,.22); border-radius: 12px; font-size: 13px; }
 
 .busy { position: fixed; inset: 0; z-index: 20; display: grid; place-content: center; text-align: center; background: rgba(5,7,10,.76); backdrop-filter: blur(5px); }
 .busy span { width: 38px; height: 38px; margin: auto; border: 3px solid rgba(255,255,255,.18); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }

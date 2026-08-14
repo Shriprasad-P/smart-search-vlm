@@ -2,7 +2,10 @@ const state = { photoOffset: 0, photoTotal: 0, history: [], attachedImageId: "" 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
-function busy(on) { $("#busy").classList.toggle("hidden", !on); }
+function busy(on, message = "Working on your Mac…") {
+  $("#busy-message").textContent = message;
+  $("#busy").classList.toggle("hidden", !on);
+}
 function toast(message) {
   const el = $("#toast");
   el.textContent = message;
@@ -126,6 +129,27 @@ async function loadPhotos(reset = false) {
   finally { busy(false); }
 }
 
+async function uploadImages(files, source) {
+  const selected = [...files];
+  if (!selected.length) return;
+  if (selected.length > 10) { toast("Select no more than 10 images at once."); return; }
+  const form = new FormData();
+  selected.forEach((file) => form.append("image", file, file.name || `${source}.jpg`));
+  busy(true, `Ingesting ${selected.length} image${selected.length === 1 ? "" : "s"}… this can take a minute.`);
+  try {
+    const data = await api("/api/ingest", { method: "POST", body: form });
+    const ingestion = data.ingestion || {};
+    const completed = (ingestion.ingested || 0) + (ingestion.skipped_duplicates || 0);
+    const status = $("#ingest-status");
+    status.textContent = `${completed} image${completed === 1 ? "" : "s"} ready in Smart Stack${ingestion.skipped_duplicates ? ` · ${ingestion.skipped_duplicates} already indexed` : ""}.`;
+    status.classList.remove("hidden");
+    renderCards("#ingest-results", data.items || []);
+    await health();
+    state.photoOffset = 0;
+  } catch (error) { toast(error.message); }
+  finally { busy(false); }
+}
+
 $$('.tab').forEach((tab) => tab.addEventListener('click', () => {
   showView(tab.dataset.view);
   if (tab.dataset.view === 'photos' && state.photoOffset === 0) loadPhotos(true);
@@ -174,4 +198,12 @@ $("#chat-form").addEventListener("submit", async (event) => {
 
 $("#refresh-photos").addEventListener("click", () => loadPhotos(true));
 $("#load-more").addEventListener("click", () => loadPhotos(false));
+$("#camera-button").addEventListener("click", () => $("#camera-input").click());
+$("#gallery-button").addEventListener("click", () => $("#gallery-input").click());
+$("#camera-input").addEventListener("change", (event) => {
+  uploadImages(event.target.files, "camera").finally(() => { event.target.value = ""; });
+});
+$("#gallery-input").addEventListener("change", (event) => {
+  uploadImages(event.target.files, "gallery").finally(() => { event.target.value = ""; });
+});
 health();

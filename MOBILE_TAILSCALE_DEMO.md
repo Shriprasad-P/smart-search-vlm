@@ -33,9 +33,12 @@ Wi-Fi LAN or public internet.
 - **Search**: existing hybrid keyword + semantic retrieval and reranking.
 - **Ask**: existing grounded multimodal chat, with short conversation history.
 - **Photos**: browse indexed photos and focus chat on one selected photo.
+- **Add**: ingest up to 10 images from the Android gallery in one batch, or
+  capture a new image with the rear camera.
 
-The mobile gateway is deliberately read-only. It does not ingest, delete, move,
-or re-index files, so the existing CLI and SmartStackUI workflows remain
+Mobile uploads are image-validated and stored under the configured Smart Stack
+data root in `PhoneCaptures/`. The gateway cannot delete, move, or re-index
+existing files, so the existing CLI and SmartStackUI workflows remain
 unchanged.
 
 ## Quick checks

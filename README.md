@@ -93,8 +93,8 @@ Notes:
 
 ## Android Access With Tailscale
 
-Smart Stack includes a read-only mobile web gateway for hybrid search,
-grounded chat, and indexed-photo browsing. It listens on localhost and uses
+Smart Stack includes a mobile web gateway for hybrid search, grounded chat,
+indexed-photo browsing, and gallery/camera image ingestion. It listens on localhost and uses
 Tailscale Serve for private tailnet-only HTTPS access:
 
 ```bash

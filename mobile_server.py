@@ -8,11 +8,17 @@ publish it privately to the tailnet instead of exposing it to the local LAN.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import logging
 import mimetypes
+import re
 import threading
 import time
+import uuid
+from datetime import datetime, timezone
+from email import policy
+from email.parser import BytesParser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -22,11 +28,30 @@ from urllib.parse import parse_qs, unquote, urlparse
 from mm_stack.api import chat, photos_list, search
 from mm_stack.config import StackConfig
 from mm_stack.db import connect_sqlite, ensure_schema
+from mm_stack.ingestion import MultimodalIngestor
 
 
 LOG = logging.getLogger("smart_stack.mobile")
 MAX_JSON_BODY = 64 * 1024
 MAX_TOP_K = 20
+MAX_UPLOAD_BODY = 80 * 1024 * 1024
+MAX_UPLOAD_FILE = 25 * 1024 * 1024
+MAX_UPLOAD_FILES = 10
+MAX_IMAGE_PIXELS = 40_000_000
+IMAGE_FORMAT_EXTENSIONS = {
+    "JPEG": ".jpg",
+    "PNG": ".png",
+    "WEBP": ".webp",
+    "BMP": ".bmp",
+    "TIFF": ".tiff",
+    "HEIC": ".heic",
+    "HEIF": ".heif",
+}
+
+
+def _ingest_paths(paths: list[Path], cfg: StackConfig) -> dict[str, Any]:
+    ingestor = MultimodalIngestor(cfg, image_batch_size=max(1, len(paths)))
+    return ingestor.ingest_batch(paths, safe_reprocess=False)
 
 
 class MobileApp:
@@ -38,13 +63,134 @@ class MobileApp:
         *,
         search_fn: Callable[..., dict[str, Any]] = search,
         chat_fn: Callable[..., dict[str, Any]] = chat,
+        ingest_fn: Callable[[list[Path], StackConfig], dict[str, Any]] = _ingest_paths,
     ) -> None:
         self.cfg = cfg or StackConfig()
         self.search_fn = search_fn
         self.chat_fn = chat_fn
+        self.ingest_fn = ingest_fn
         # MLX/PyTorch model loads are RAM-heavy. Keep inference requests serial.
         self.inference_lock = threading.Lock()
         self.started_at = time.time()
+
+    @staticmethod
+    def _validated_image(data: bytes) -> tuple[str, int, int]:
+        if not data:
+            raise ValueError("The selected image is empty.")
+        if len(data) > MAX_UPLOAD_FILE:
+            raise ValueError("Each image must be 25 MB or smaller.")
+        try:
+            from PIL import Image
+
+            with Image.open(io.BytesIO(data)) as image:
+                image_format = str(image.format or "").upper()
+                width, height = image.size
+                if image_format not in IMAGE_FORMAT_EXTENSIONS:
+                    raise ValueError(f"Unsupported image format: {image_format or 'unknown'}.")
+                if width <= 0 or height <= 0 or (width * height) > MAX_IMAGE_PIXELS:
+                    raise ValueError("Image dimensions are invalid or too large.")
+                image.verify()
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError("The selected file is not a readable image.") from exc
+        return IMAGE_FORMAT_EXTENSIONS[image_format], int(width), int(height)
+
+    @staticmethod
+    def _safe_stem(filename: str) -> str:
+        stem = Path(filename or "mobile-photo").stem
+        stem = re.sub(r"[^A-Za-z0-9_-]+", "-", stem).strip("-_")
+        return (stem or "mobile-photo")[:48]
+
+    def _uploaded_items(self, paths: list[Path]) -> list[dict[str, Any]]:
+        if not paths:
+            return []
+        conn = connect_sqlite(self.cfg)
+        ensure_schema(conn)
+        placeholders = ",".join("?" for _ in paths)
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT id, file_path, caption, summary, tags, created_at
+                FROM images
+                WHERE file_path IN ({placeholders})
+                """,
+                [str(path) for path in paths],
+            ).fetchall()
+        finally:
+            conn.close()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                tags = json.loads(str(row["tags"] or "[]"))
+                if not isinstance(tags, list):
+                    tags = []
+            except Exception:
+                tags = []
+            items.append(
+                {
+                    "image_id": str(row["id"]),
+                    "file_path": str(row["file_path"]),
+                    "caption": str(row["caption"] or ""),
+                    "summary": str(row["summary"] or ""),
+                    "tags": [str(tag) for tag in tags],
+                    "created_at": str(row["created_at"] or ""),
+                    "exists_on_disk": True,
+                }
+            )
+        return items
+
+    def ingest_uploads(self, uploads: list[tuple[str, str, bytes]]) -> dict[str, Any]:
+        if not uploads:
+            raise ValueError("Choose at least one image.")
+        if len(uploads) > MAX_UPLOAD_FILES:
+            raise ValueError(f"Select no more than {MAX_UPLOAD_FILES} images at once.")
+
+        validated: list[tuple[str, str, bytes, str, int, int]] = []
+        for filename, content_type, data in uploads:
+            extension, width, height = self._validated_image(data)
+            validated.append((filename, content_type, data, extension, width, height))
+
+        capture_dir = self.cfg.vault_root / "PhoneCaptures"
+        capture_dir.mkdir(parents=True, exist_ok=True)
+        saved_paths: list[Path] = []
+        temporary_paths: list[Path] = []
+        dimensions: list[dict[str, int]] = []
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        try:
+            for filename, _content_type, data, extension, width, height in validated:
+                destination = capture_dir / (
+                    f"{timestamp}-{self._safe_stem(filename)}-{uuid.uuid4().hex[:10]}{extension}"
+                )
+                temporary = destination.with_suffix(destination.suffix + ".part")
+                temporary_paths.append(temporary)
+                temporary.write_bytes(data)
+                temporary.replace(destination)
+                temporary_paths.remove(temporary)
+                saved_paths.append(destination)
+                dimensions.append({"width": width, "height": height})
+        except Exception:
+            for path in temporary_paths:
+                path.unlink(missing_ok=True)
+            for path in saved_paths:
+                path.unlink(missing_ok=True)
+            raise
+
+        with self.inference_lock:
+            result = self.ingest_fn(saved_paths, self.cfg)
+
+        failures = list(result.get("failed", []))
+        ingested = int(result.get("ingested", 0))
+        duplicates = int(result.get("skipped_duplicates", 0))
+        if failures and not (ingested or duplicates):
+            raise RuntimeError(str(failures[0]))
+        return {
+            "uploaded": len(saved_paths),
+            "saved_paths": [str(path) for path in saved_paths],
+            "dimensions": dimensions,
+            "ingestion": result,
+            "items": self._uploaded_items(saved_paths),
+        }
 
     @staticmethod
     def _top_k(value: Any, default: int) -> int:
@@ -179,6 +325,42 @@ def make_handler(app: MobileApp, static_dir: Path) -> type[BaseHTTPRequestHandle
                 raise ValueError("JSON body must be an object.")
             return payload
 
+        def _read_uploads(self) -> list[tuple[str, str, bytes]]:
+            content_type = self.headers.get("Content-Type", "").strip()
+            if not content_type.lower().startswith("multipart/form-data"):
+                raise ValueError("Content-Type must be multipart/form-data.")
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError as exc:
+                raise ValueError("Invalid Content-Length.") from exc
+            if length <= 0 or length > MAX_UPLOAD_BODY:
+                raise ValueError("Upload is empty or exceeds the 80 MB request limit.")
+            body = self.rfile.read(length)
+            header = (
+                f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n"
+            ).encode("utf-8")
+            try:
+                message = BytesParser(policy=policy.default).parsebytes(header + body)
+            except Exception as exc:
+                raise ValueError("Unable to parse the image upload.") from exc
+            if not message.is_multipart():
+                raise ValueError("Upload does not contain multipart image data.")
+            uploads: list[tuple[str, str, bytes]] = []
+            for part in message.iter_parts():
+                field_name = str(part.get_param("name", header="content-disposition") or "")
+                if field_name != "image" or part.get_content_disposition() != "form-data":
+                    continue
+                filename = str(part.get_filename() or "mobile-photo")
+                payload = part.get_payload(decode=True)
+                if not isinstance(payload, bytes):
+                    continue
+                uploads.append((filename, str(part.get_content_type()), payload))
+            if not uploads:
+                raise ValueError("No image files were found in the upload.")
+            if len(uploads) > MAX_UPLOAD_FILES:
+                raise ValueError(f"Select no more than {MAX_UPLOAD_FILES} images at once.")
+            return uploads
+
         def _static(self, filename: str, content_type: str) -> None:
             path = static_dir / filename
             if not path.is_file():
@@ -245,6 +427,9 @@ def make_handler(app: MobileApp, static_dir: Path) -> type[BaseHTTPRequestHandle
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
             parsed = urlparse(self.path)
             try:
+                if parsed.path == "/api/ingest":
+                    self._json(HTTPStatus.OK, app.ingest_uploads(self._read_uploads()))
+                    return
                 payload = self._read_json()
                 if parsed.path == "/api/search":
                     self._json(HTTPStatus.OK, app.run_search(payload))

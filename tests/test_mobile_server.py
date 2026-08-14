@@ -1,4 +1,5 @@
 import json
+import io
 import tempfile
 import threading
 import unittest
@@ -6,6 +7,8 @@ import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+
+from PIL import Image
 
 from mm_stack.config import StackConfig
 from mm_stack.db import connect_sqlite, ensure_schema, upsert_image_metadata
@@ -63,10 +66,16 @@ class MobileServerTests(unittest.TestCase):
         conn.close()
         self.search_calls = []
         self.chat_calls = []
+        self.ingest_calls = []
         app = MobileApp(
             self.cfg,
             search_fn=lambda **kwargs: self.search_calls.append(kwargs) or {"results": []},
             chat_fn=lambda **kwargs: self.chat_calls.append(kwargs) or {"answer": "ok", "sources": []},
+            ingest_fn=lambda paths, cfg: self.ingest_calls.append((paths, cfg)) or {
+                "ingested": len(paths),
+                "skipped_duplicates": 0,
+                "failed": [],
+            },
         )
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app, self.static_dir))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -92,6 +101,33 @@ class MobileServerTests(unittest.TestCase):
         )
         with urllib.request.urlopen(request, timeout=3) as response:
             return response.status, json.loads(response.read())
+
+    def post_multipart(self, path, files):
+        boundary = "----SmartStackMobileTestBoundary"
+        body = bytearray()
+        for filename, content_type, payload in files:
+            body.extend(f"--{boundary}\r\n".encode())
+            body.extend(
+                f'Content-Disposition: form-data; name="image"; filename="{filename}"\r\n'.encode()
+            )
+            body.extend(f"Content-Type: {content_type}\r\n\r\n".encode())
+            body.extend(payload)
+            body.extend(b"\r\n")
+        body.extend(f"--{boundary}--\r\n".encode())
+        request = urllib.request.Request(
+            self.base + path,
+            data=bytes(body),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=3) as response:
+            return response.status, json.loads(response.read())
+
+    @staticmethod
+    def jpeg_bytes():
+        buffer = io.BytesIO()
+        Image.new("RGB", (12, 8), color=(40, 120, 200)).save(buffer, format="JPEG")
+        return buffer.getvalue()
 
     def test_health_photos_and_indexed_image(self):
         status, headers, body = self.get("/api/health")
@@ -120,6 +156,33 @@ class MobileServerTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as caught:
             self.get("/api/image/../../etc/passwd")
         self.assertEqual(caught.exception.code, 404)
+
+    def test_gallery_upload_is_validated_saved_and_sent_to_ingestion(self):
+        status, body = self.post_multipart(
+            "/api/ingest",
+            [
+                ("../../camera photo.jpg", "image/jpeg", self.jpeg_bytes()),
+                ("gallery-photo.jpg", "image/jpeg", self.jpeg_bytes()),
+            ],
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(body["uploaded"], 2)
+        self.assertEqual(body["ingestion"]["ingested"], 2)
+        self.assertEqual(len(self.ingest_calls), 1)
+        self.assertEqual(len(self.ingest_calls[0][0]), 2)
+        for saved in self.ingest_calls[0][0]:
+            self.assertTrue(saved.is_file())
+            self.assertEqual(saved.parent, self.cfg.vault_root / "PhoneCaptures")
+            self.assertNotIn("..", saved.name)
+
+    def test_non_image_upload_is_rejected_before_ingestion(self):
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.post_multipart(
+                "/api/ingest",
+                [("not-image.jpg", "image/jpeg", b"not actually an image")],
+            )
+        self.assertEqual(caught.exception.code, 400)
+        self.assertEqual(self.ingest_calls, [])
 
 
 if __name__ == "__main__":
