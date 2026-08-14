@@ -1,0 +1,310 @@
+const state = { photoOffset: 0, photoTotal: 0, history: [], attachedImageId: "" };
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
+const imageQueue = [];
+let activeImageLoads = 0;
+const maxConcurrentImageLoads = 4;
+
+function pumpImageQueue() {
+  while (activeImageLoads < maxConcurrentImageLoads && imageQueue.length) {
+    const task = imageQueue.shift();
+    if (!task.img.isConnected) continue;
+    activeImageLoads += 1;
+    let finished = false;
+    const finish = (failed) => {
+      if (finished) return;
+      finished = true;
+      activeImageLoads -= 1;
+      if (failed && task.onError) task.onError();
+      pumpImageQueue();
+    };
+    task.img.addEventListener("load", () => finish(false), { once: true });
+    task.img.addEventListener("error", () => finish(true), { once: true });
+    task.img.src = task.url;
+  }
+}
+
+function queueImage(img, url, onError = null) {
+  imageQueue.push({ img, url, onError });
+  // Cards are assembled before they are attached to the document. Defer the
+  // connectivity check until the current render pass has appended them.
+  window.setTimeout(pumpImageQueue, 0);
+}
+
+function busy(on, message = "Working on your Mac…") {
+  $("#busy-message").textContent = message;
+  $("#busy").classList.toggle("hidden", !on);
+}
+function toast(message) {
+  const el = $("#toast");
+  el.textContent = message;
+  el.classList.remove("hidden");
+  window.setTimeout(() => el.classList.add("hidden"), 5000);
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, options);
+  const data = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  return data;
+}
+
+function showView(name) {
+  $$(".tab").forEach((el) => el.classList.toggle("active", el.dataset.view === name));
+  $$(".view").forEach((el) => el.classList.toggle("active", el.id === `${name}-view`));
+}
+
+function imageUrl(item, size = "thumb") {
+  return `/api/image/${encodeURIComponent(item.image_id)}?size=${encodeURIComponent(size)}`;
+}
+
+let modalItem = null;
+
+function openPhoto(item) {
+  modalItem = item;
+  const modal = $("#photo-modal");
+  const img = $("#modal-image");
+  img.classList.remove("zoomed", "hidden");
+  $("#modal-image-error").classList.add("hidden");
+  img.src = imageUrl(item, "full");
+  img.alt = item.caption || "Indexed image";
+  $("#modal-caption").textContent = item.caption || "Untitled image";
+  $("#modal-summary").textContent = item.summary || "No additional summary is available.";
+  const tagBox = $("#modal-tags");
+  tagBox.replaceChildren();
+  const tags = Array.isArray(item.tags) ? item.tags : [];
+  tags.forEach((text) => {
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = text;
+    tagBox.append(tag);
+  });
+  const created = item.created_at ? new Date(item.created_at) : null;
+  $("#modal-date").textContent = created && !Number.isNaN(created.valueOf())
+    ? `Indexed ${created.toLocaleString()}` : "";
+  if (typeof modal.showModal === "function") modal.showModal();
+  else modal.setAttribute("open", "");
+}
+
+function closePhoto() {
+  const modal = $("#photo-modal");
+  if (typeof modal.close === "function") modal.close();
+  else modal.removeAttribute("open");
+  $("#modal-image").src = "";
+  modalItem = null;
+}
+
+function card(item) {
+  const node = $("#card-template").content.firstElementChild.cloneNode(true);
+  node.tabIndex = 0;
+  node.setAttribute("aria-label", `Open details for ${item.caption || "indexed image"}`);
+  const img = node.querySelector("img");
+  img.alt = item.caption || "Indexed photo";
+  queueImage(img, imageUrl(item, "thumb"), () => {
+    img.remove();
+    node.querySelector(".image-wrap").classList.add("image-missing");
+  });
+  node.querySelector(".caption").textContent = item.caption || item.summary || "Untitled photo";
+  const tags = Array.isArray(item.tags) ? item.tags.slice(0, 3) : [];
+  const tagBox = node.querySelector(".tags");
+  tags.forEach((text) => {
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = text;
+    tagBox.append(tag);
+  });
+  node.addEventListener("click", (event) => {
+    if (!event.target.closest("button")) openPhoto(item);
+  });
+  node.addEventListener("keydown", (event) => {
+    if ((event.key === "Enter" || event.key === " ") && event.target === node) {
+      event.preventDefault();
+      openPhoto(item);
+    }
+  });
+  node.querySelector(".ask-photo").addEventListener("click", (event) => {
+    event.stopPropagation();
+    attachPhoto(item);
+  });
+  return node;
+}
+
+function renderCards(target, items, replace = true) {
+  const box = $(target);
+  if (replace) box.replaceChildren();
+  if (!items.length && replace) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "No matching indexed photos.";
+    box.append(empty);
+    return;
+  }
+  items.forEach((item) => box.append(card(item)));
+}
+
+function attachPhoto(item) {
+  state.attachedImageId = item.image_id;
+  const box = $("#attachment");
+  box.replaceChildren();
+  const label = document.createElement("span");
+  label.textContent = `Focused on: ${item.caption || "selected photo"}`;
+  const clear = document.createElement("button");
+  clear.className = "secondary";
+  clear.textContent = "Clear";
+  clear.addEventListener("click", clearAttachment);
+  box.append(label, clear);
+  box.classList.remove("hidden");
+  showView("chat");
+  $("#chat-input").focus();
+}
+
+function clearAttachment() {
+  state.attachedImageId = "";
+  $("#attachment").classList.add("hidden");
+}
+
+function addMessage(role, text, sources = []) {
+  const message = document.createElement("div");
+  message.className = `message ${role}`;
+  const body = document.createElement("div");
+  body.textContent = text;
+  message.append(body);
+  if (sources.length) {
+    const sourceBox = document.createElement("div");
+    sourceBox.className = "sources";
+    sources.slice(0, 5).forEach((source) => {
+      if (!source.image_id) return;
+      const img = document.createElement("img");
+      img.className = "source-thumb";
+      img.alt = source.caption || "Source photo";
+      queueImage(img, imageUrl(source, "thumb"));
+      img.addEventListener("click", () => openPhoto(source));
+      sourceBox.append(img);
+    });
+    message.append(sourceBox);
+  }
+  $("#messages").append(message);
+  message.scrollIntoView({ behavior: "smooth", block: "end" });
+}
+
+async function health() {
+  try {
+    const data = await api("/api/health");
+    const badge = $("#health");
+    badge.textContent = `${data.total_indexed} indexed`;
+    badge.classList.add("ok");
+  } catch (error) {
+    $("#health").textContent = "Mac offline";
+    toast(error.message);
+  }
+}
+
+async function loadPhotos(reset = false) {
+  if (reset) state.photoOffset = 0;
+  busy(true);
+  try {
+    const data = await api(`/api/photos?limit=30&offset=${state.photoOffset}`);
+    state.photoTotal = data.total_indexed;
+    renderCards("#photos", data.items, reset || state.photoOffset === 0);
+    state.photoOffset += data.items.length;
+    $("#photo-count").textContent = `${state.photoOffset} of ${state.photoTotal}`;
+    $("#load-more").classList.toggle("hidden", state.photoOffset >= state.photoTotal || !data.items.length);
+  } catch (error) { toast(error.message); }
+  finally { busy(false); }
+}
+
+async function uploadImages(files, source) {
+  const selected = [...files];
+  if (!selected.length) return;
+  if (selected.length > 10) { toast("Select no more than 10 images at once."); return; }
+  const form = new FormData();
+  selected.forEach((file) => form.append("image", file, file.name || `${source}.jpg`));
+  busy(true, `Ingesting ${selected.length} image${selected.length === 1 ? "" : "s"}… this can take a minute.`);
+  try {
+    const data = await api("/api/ingest", { method: "POST", body: form });
+    const ingestion = data.ingestion || {};
+    const completed = (ingestion.ingested || 0) + (ingestion.skipped_duplicates || 0);
+    const status = $("#ingest-status");
+    status.textContent = `${completed} image${completed === 1 ? "" : "s"} ready in Smart Stack${ingestion.skipped_duplicates ? ` · ${ingestion.skipped_duplicates} already indexed` : ""}.`;
+    status.classList.remove("hidden");
+    renderCards("#ingest-results", data.items || []);
+    await health();
+    state.photoOffset = 0;
+  } catch (error) { toast(error.message); }
+  finally { busy(false); }
+}
+
+$$('.tab').forEach((tab) => tab.addEventListener('click', () => {
+  showView(tab.dataset.view);
+  if (tab.dataset.view === 'photos' && state.photoOffset === 0) loadPhotos(true);
+}));
+
+$("#search-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const query = $("#search-input").value.trim();
+  if (!query) return;
+  busy(true);
+  $("#search-note").textContent = "Searching your multimodal index…";
+  try {
+    const data = await api("/api/search", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, top_k: 10, mode: "auto" }),
+    });
+    renderCards("#search-results", data.results || []);
+    const latency = data.latency_ms ? ` · ${Math.round(data.latency_ms)} ms` : "";
+    $("#search-note").textContent = `${(data.results || []).length} results${latency}`;
+  } catch (error) { toast(error.message); $("#search-note").textContent = "Search failed"; }
+  finally { busy(false); }
+});
+
+$("#chat-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = $("#chat-input");
+  const query = input.value.trim();
+  if (!query) return;
+  input.value = "";
+  addMessage("user", query);
+  busy(true);
+  try {
+    const data = await api("/api/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query, top_k: 3, history: state.history.slice(-8),
+        attached_image_id: state.attachedImageId,
+      }),
+    });
+    addMessage("assistant", data.answer || "No grounded answer returned.", data.sources || []);
+    state.history.push({ role: "user", content: query }, { role: "assistant", content: data.answer || "" });
+    if (state.history.length > 8) state.history = state.history.slice(-8);
+  } catch (error) { addMessage("assistant", `I couldn't complete that request: ${error.message}`); }
+  finally { busy(false); }
+});
+
+$("#refresh-photos").addEventListener("click", () => loadPhotos(true));
+$("#load-more").addEventListener("click", () => loadPhotos(false));
+$("#camera-button").addEventListener("click", () => $("#camera-input").click());
+$("#gallery-button").addEventListener("click", () => $("#gallery-input").click());
+$("#camera-input").addEventListener("change", (event) => {
+  uploadImages(event.target.files, "camera").finally(() => { event.target.value = ""; });
+});
+$("#gallery-input").addEventListener("change", (event) => {
+  uploadImages(event.target.files, "gallery").finally(() => { event.target.value = ""; });
+});
+$("#modal-close").addEventListener("click", closePhoto);
+$("#photo-modal").addEventListener("click", (event) => {
+  if (event.target === $("#photo-modal")) closePhoto();
+});
+$("#modal-image").addEventListener("click", (event) => {
+  event.currentTarget.classList.toggle("zoomed");
+});
+$("#modal-image").addEventListener("error", () => {
+  $("#modal-image").classList.add("hidden");
+  $("#modal-image-error").classList.remove("hidden");
+});
+$("#modal-ask").addEventListener("click", () => {
+  if (!modalItem) return;
+  const selected = modalItem;
+  closePhoto();
+  attachPhoto(selected);
+});
+health();
