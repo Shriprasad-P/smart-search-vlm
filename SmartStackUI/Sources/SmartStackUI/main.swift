@@ -3168,7 +3168,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyHandlerRef: EventHandlerRef?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        // Run as a normal foreground application so opening the installed app
+        // reliably creates a Dock presence and brings its windows forward.
+        NSApp.setActivationPolicy(.regular)
 
         // Create Command Palette
         let palette = CommandPaletteWindow()
@@ -3201,6 +3203,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        NSLog("Smart Stack reopen requested (had visible windows: \(flag))")
         presentPalette()
         return true
     }
@@ -3280,6 +3283,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let palette = commandPalette else { return }
         palette.presentOverlay()
         NSApp.activate(ignoringOtherApps: true)
+        NSLog(
+            "Presented Smart Stack palette " +
+            "(visible: \(palette.isVisible), key: \(palette.isKeyWindow), frame: \(NSStringFromRect(palette.frame)))"
+        )
     }
     
     @objc func togglePalette() {

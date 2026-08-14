@@ -88,7 +88,7 @@ open ~/Applications/SmartStackUI.app
 Notes:
 
 - keep the git clone on disk after installing; the app uses that checkout for its Python backend
-- if your clone lives somewhere unusual, the launcher passes the correct repo root automatically
+- the installed native app records the checkout path when it is built, so reinstall it after moving the clone
 - if you want a non-default data directory, set `SMART_STACK_VAULT_ROOT` before launching the app
 
 ## Android Access With Tailscale
