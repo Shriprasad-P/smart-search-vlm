@@ -1538,6 +1538,7 @@ struct ExclusionPattern: Identifiable, Decodable {
 
 struct SettingsSheet: View {
     @ObservedObject var vm: SmartStackViewModel
+    var showsCloseButton: Bool = true
     @State private var newExclusion: String = ""
     @Environment(\.dismiss) private var dismiss
 
@@ -1548,12 +1549,14 @@ struct SettingsSheet: View {
                 Text("Settings")
                     .font(.system(size: 18, weight: .bold, design: .rounded))
                 Spacer()
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
+                if showsCloseButton {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
             .padding(20)
 
@@ -1561,6 +1564,10 @@ struct SettingsSheet: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    GlobalShortcutSettingsSection()
+
+                    Divider()
+
                     // Watched Folders
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
@@ -3229,7 +3236,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let hostingController = NSHostingController(rootView: CommandPaletteView())
         palette.contentViewController = hostingController
         self.commandPalette = palette
-        registerGlobalHotkey()
+        installGlobalHotkeyHandler()
+        registerConfiguredGlobalHotkey()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(globalShortcutDidChange),
+            name: .smartStackGlobalShortcutChanged,
+            object: nil
+        )
 
         // Normal app launches use the full main window. The compact command
         // palette is reserved for the explicit Option-Space shortcut.
@@ -3247,6 +3261,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        NotificationCenter.default.removeObserver(self)
         unregisterGlobalHotkey()
     }
 
@@ -3260,7 +3275,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    private func registerGlobalHotkey() {
+    private func installGlobalHotkeyHandler() {
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         let userData = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
 
@@ -3298,19 +3313,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             &hotKeyHandlerRef
         )
 
+    }
+
+    @objc private func globalShortcutDidChange() {
+        registerConfiguredGlobalHotkey()
+    }
+
+    private func registerConfiguredGlobalHotkey() {
+        if let ref = hotKeyRef {
+            UnregisterEventHotKey(ref)
+            hotKeyRef = nil
+        }
+
+        let shortcut = GlobalShortcutPreference.current
         let hotKeyID = EventHotKeyID(signature: OSType(0x5353544B), id: 1) // "SSTK"
         let registrationStatus = RegisterEventHotKey(
-            UInt32(kVK_Space),
-            UInt32(optionKey),
+            shortcut.keyCode,
+            shortcut.carbonModifiers,
             hotKeyID,
             GetApplicationEventTarget(),
             0,
             &hotKeyRef
         )
         if registrationStatus != noErr {
-            NSLog("Unable to register the global Option-Space shortcut (status: \(registrationStatus))")
+            let message = "Could not register \(shortcut.display). It may already be used by macOS or another app."
+            Task { @MainActor in
+                GlobalShortcutRegistrationState.shared.update(registered: false, message: message)
+            }
+            NSLog("Unable to register global shortcut \(shortcut.display) (status: \(registrationStatus))")
         } else {
-            NSLog("Registered global Option-Space shortcut")
+            Task { @MainActor in
+                GlobalShortcutRegistrationState.shared.update(
+                    registered: true,
+                    message: "Active shortcut: \(shortcut.display)"
+                )
+            }
+            NSLog("Registered global shortcut \(shortcut.display)")
         }
     }
 
@@ -3398,6 +3436,10 @@ struct SmartStackUIApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
+
+        Settings {
+            SettingsSheet(vm: vm, showsCloseButton: false)
+        }
 
         MenuBarExtra("Smart Stack", systemImage: "sparkles.rectangle.stack") {
             Button("Open Console") {

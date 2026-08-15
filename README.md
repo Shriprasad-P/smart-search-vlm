@@ -306,7 +306,7 @@ A local UI wrapper has been added at:
 It supports:
 
 - semantic and keyword image search
-- global `Option+Space` shortcut to open or dismiss the Smart Stack search palette
+- global shortcut to open or dismiss the Smart Stack search palette (defaults to `Option+Space` and can be changed in **SmartStackUI → Settings…** with `Command+,`)
 - source/score filters
 - one-click `Ingest Inbox`, `Safe Reprocess`, and `Index Notes`
 - opening result files directly
