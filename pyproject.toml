@@ -10,6 +10,7 @@ dependencies = [
     "mlx-vlm",
     "open-clip-torch",
     "pillow",
+    "pypdf>=5.0",
     "pyobjc-framework-Vision",
     "rapidfuzz",
     "sentence-transformers",

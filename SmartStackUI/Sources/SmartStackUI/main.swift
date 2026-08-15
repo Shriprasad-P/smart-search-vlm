@@ -64,6 +64,7 @@ enum TimelineGranularity: String, CaseIterable, Identifiable {
 enum SourceFilter: String, CaseIterable, Identifiable {
     case all = "All"
     case image = "Images"
+    case document = "Documents"
 
     var id: String { rawValue }
 }
@@ -94,6 +95,7 @@ struct SearchResultItem: Identifiable, Decodable {
     let filePath: String
     let caption: String
     let score: Double
+    let source: String
 }
 
 // New Multimodal Response Structs
@@ -109,6 +111,9 @@ struct MultimodalResultItem: Decodable {
     let tags: [String]
     let score: Double
     let source: String?
+    let content_type: String?
+    let section_label: String?
+    let chunk_index: Int?
 }
 
 struct ChatResponse: Decodable {
@@ -213,6 +218,7 @@ struct PhotosListResponse: Decodable {
     let offset: Int
     let include_missing: Bool
     let path_checks_performed: Bool
+    let content_type: String?
     let items: [IndexedPhotoItem]
 }
 
@@ -226,6 +232,8 @@ struct IndexedPhotoItem: Decodable {
     let updated_at: String
     let is_stale: Bool
     let exists_on_disk: Bool
+    let content_type: String
+    let section_label: String
 }
 
 struct ClusterListResponse: Decodable {
@@ -366,6 +374,8 @@ final class SmartStackViewModel: ObservableObject {
                 sourceOK = true
             case .image:
                 sourceOK = row.source == "image"
+            case .document:
+                sourceOK = row.source == "document"
             }
             return sourceOK && row.numericScore >= minScore
         }
@@ -378,7 +388,8 @@ final class SmartStackViewModel: ObservableObject {
                 id: res.id, 
                 filePath: res.obsidian_path, 
                 caption: res.caption, 
-                score: res.numericScore
+                score: res.numericScore,
+                source: res.source
             )
         }
     }
@@ -723,7 +734,7 @@ final class SmartStackViewModel: ObservableObject {
                     let url = URL(fileURLWithPath: item.file_path)
                     return SearchResult(
                         image_id: item.image_id,
-                        source: "image", 
+                        source: item.content_type ?? "image",
                         filename: url.lastPathComponent,
                         caption: item.caption,
                         tags: item.tags,
@@ -962,9 +973,35 @@ final class SmartStackViewModel: ObservableObject {
         }
     }
 
+    func runAllFiles(limit: Int = 180) {
+        runIndexedLibrary(
+            contentType: "all",
+            selectedFilter: .all,
+            title: "All Files",
+            noun: "files",
+            limit: limit
+        )
+    }
+
     func runAllPhotos(limit: Int = 180) {
+        runIndexedLibrary(
+            contentType: "image",
+            selectedFilter: .image,
+            title: "Images",
+            noun: "images",
+            limit: limit
+        )
+    }
+
+    private func runIndexedLibrary(
+        contentType: String,
+        selectedFilter: SourceFilter,
+        title: String,
+        noun: String,
+        limit: Int
+    ) {
         isChatMode = false
-        sourceFilter = .image
+        sourceFilter = selectedFilter
         minScore = 0.0
         query = ""
         visualQueryImagePath = ""
@@ -975,16 +1012,18 @@ final class SmartStackViewModel: ObservableObject {
             "photos-list",
             "--limit",
             "\(max(1, limit))",
+            "--content-type",
+            contentType,
         ]
 
-        runCommand(args: args, title: "All Photos") { output, stderr, code in
+        runCommand(args: args, title: title) { output, stderr, code in
             guard code == 0 else {
                 let err = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                self.appendLog("All Photos failed code \(code). \(err)")
+                self.appendLog("\(title) failed code \(code). \(err)")
                 return
             }
             guard !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                self.appendLog("All Photos output is empty.")
+                self.appendLog("\(title) output is empty.")
                 return
             }
             do {
@@ -993,7 +1032,7 @@ final class SmartStackViewModel: ObservableObject {
                     let url = URL(fileURLWithPath: item.file_path)
                     return SearchResult(
                         image_id: item.image_id,
-                        source: "image",
+                        source: item.content_type,
                         filename: url.lastPathComponent,
                         caption: item.caption.isEmpty ? item.summary : item.caption,
                         tags: item.tags,
@@ -1002,21 +1041,21 @@ final class SmartStackViewModel: ObservableObject {
                     )
                 }
                 self.appendLog(
-                    "All Photos debug: results=\(self.results.count), filtered=\(self.filteredResults.count), "
+                    "\(title) debug: results=\(self.results.count), filtered=\(self.filteredResults.count), "
                     + "isChatMode=\(self.isChatMode), minScore=\(String(format: "%.2f", self.minScore)), filter=\(self.sourceFilter.rawValue)"
                 )
                 if resp.path_checks_performed {
                     let missingCount = resp.items.filter { !$0.exists_on_disk }.count
                     self.appendLog(
-                        "All Photos: loaded \(resp.returned)/\(resp.total_indexed) indexed photos."
+                        "\(title): loaded \(resp.returned)/\(resp.total_indexed) indexed \(noun)."
                         + (missingCount > 0 ? " Missing on disk: \(missingCount)." : "")
                     )
                 } else {
-                    self.appendLog("All Photos: loaded \(resp.returned)/\(resp.total_indexed) indexed photos (fast mode).")
+                    self.appendLog("\(title): loaded \(resp.returned)/\(resp.total_indexed) indexed \(noun) (fast mode).")
                 }
             } catch {
-                self.appendLog("All Photos parse error: \(error.localizedDescription)")
-                self.appendLog("All Photos output preview: \(self.truncatedLogLine(output, maxChars: 700))")
+                self.appendLog("\(title) parse error: \(error.localizedDescription)")
+                self.appendLog("\(title) output preview: \(self.truncatedLogLine(output, maxChars: 700))")
             }
         }
     }
@@ -1186,7 +1225,7 @@ final class SmartStackViewModel: ObservableObject {
                     let url = URL(fileURLWithPath: item.file_path)
                     return SearchResult(
                         image_id: item.image_id,
-                        source: "image",
+                        source: item.content_type ?? "image",
                         filename: url.lastPathComponent,
                         caption: item.caption,
                         tags: item.tags,
@@ -1336,12 +1375,12 @@ final class SmartStackViewModel: ObservableObject {
                     self.isBusy = false
                     // Log output (combined) for debugging visibility
                     if !combined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        if title == "All Photos" {
+                        if title == "All Photos" || title == "All Files" || title == "Images" {
                             let trimmedErr = errText.trimmingCharacters(in: .whitespacesAndNewlines)
                             if !trimmedErr.isEmpty {
                                 self.appendLog(trimmedErr)
                             }
-                            self.appendLog("[All Photos] Raw JSON output suppressed (\(outText.utf8.count) bytes).")
+                            self.appendLog("[\(title)] Raw JSON output suppressed (\(outText.utf8.count) bytes).")
                         } else {
                             self.appendLog(self.truncatedLogLine(combined, maxChars: 10000))
                         }
@@ -2357,7 +2396,7 @@ struct ResultCard: View {
     }
 
     private var badgeColor: Color {
-        result.source == "note" ? .orange : .mint
+        result.source == "document" ? .indigo : (result.source == "note" ? .orange : .mint)
     }
 
     var body: some View {
@@ -2393,12 +2432,12 @@ struct ResultCard: View {
             } else {
                  ZStack(alignment: .topLeading) {
                      Rectangle()
-                        .fill(Color.yellow.opacity(0.1))
+                        .fill(result.source == "document" ? Color.indigo.opacity(0.12) : Color.yellow.opacity(0.1))
                         .aspectRatio(1.2, contentMode: .fit)
                      
-                     Image(systemName: "note.text")
+                     Image(systemName: result.source == "document" ? "doc.text.fill" : "note.text")
                         .font(.title2)
-                        .foregroundStyle(.orange.opacity(0.8))
+                        .foregroundStyle(result.source == "document" ? Color.indigo.opacity(0.9) : Color.orange.opacity(0.8))
                         .padding(12)
                         
                     Text(result.filename)
@@ -2779,8 +2818,20 @@ struct ContentView: View {
             }
 
             labeledIconButton(
-                title: "All Photos",
-                help: "All Indexed Photos",
+                title: "All Files",
+                help: "Browse all indexed images and documents",
+                action: { vm.runAllFiles() }
+            ) {
+                Image(systemName: "doc.on.doc.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+
+            labeledIconButton(
+                title: "Images",
+                help: "Browse indexed images",
                 action: { vm.runAllPhotos() }
             ) {
                 Image(systemName: "photo.stack")
@@ -2853,7 +2904,8 @@ struct ContentView: View {
                 Button("Pick Visual Query Image") { vm.pickVisualQueryImage() }
                 Button("Paste Image as Visual Query") { vm.pasteClipboardImageForSearch() }
                 Button("Paste Image and Ingest") { vm.pasteClipboardImageAndIngest() }
-                Button("All Indexed Photos") { vm.runAllPhotos() }
+                Button("All Indexed Files") { vm.runAllFiles() }
+                Button("All Indexed Images") { vm.runAllPhotos() }
                 Button("Open Photo Clusters") { vm.openClusters() }
                 Button("Auto Cluster Photos") { vm.runAutoCluster() }
                 if vm.hasVisualQueryImage {
@@ -3376,7 +3428,10 @@ struct SmartStackUIApp: App {
             Button("Photo Clusters") {
                 vm.openClusters()
             }
-            Button("All Indexed Photos") {
+            Button("All Indexed Files") {
+                vm.runAllFiles()
+            }
+            Button("All Indexed Images") {
                 vm.runAllPhotos()
             }
             Button("Auto Cluster Photos") {
