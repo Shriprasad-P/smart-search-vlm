@@ -303,7 +303,6 @@ final class SmartStackViewModel: ObservableObject {
     @Published var isBusy: Bool = false
     @Published var results: [SearchResult] = []
     @Published var logs: String = "Ready."
-    @Published var showSettings: Bool = false
     @Published var watchedFolders: [WatchedFolder] = []
     @Published var exclusions: [ExclusionPattern] = []
     @Published var showContextLens: Bool = false
@@ -1538,9 +1537,25 @@ struct ExclusionPattern: Identifiable, Decodable {
 
 struct SettingsSheet: View {
     @ObservedObject var vm: SmartStackViewModel
-    var showsCloseButton: Bool = true
     @State private var newExclusion: String = ""
-    @Environment(\.dismiss) private var dismiss
+
+    private let actionColumns = [
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10),
+    ]
+
+    private func settingsAction(
+        _ title: String,
+        systemImage: String,
+        role: ButtonRole? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(role: role, action: action) {
+            Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.bordered)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1549,14 +1564,6 @@ struct SettingsSheet: View {
                 Text("Settings")
                     .font(.system(size: 18, weight: .bold, design: .rounded))
                 Spacer()
-                if showsCloseButton {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
             }
             .padding(20)
 
@@ -1565,6 +1572,89 @@ struct SettingsSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     GlobalShortcutSettingsSection()
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Search", systemImage: "magnifyingglass")
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+
+                        Picker("Mode", selection: $vm.searchMode) {
+                            ForEach(SearchMode.allCases) { mode in
+                                Text(mode.rawValue).tag(mode)
+                            }
+                        }
+
+                        Picker("File Type", selection: $vm.sourceFilter) {
+                            ForEach(SourceFilter.allCases) { filter in
+                                Text(filter.rawValue).tag(filter)
+                            }
+                        }
+
+                        Stepper("Number of results (Top K): \(vm.topK)", value: $vm.topK, in: 1...50)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Minimum score: \(String(format: "%.2f", vm.minScore))")
+                            Slider(value: $vm.minScore, in: 0...1)
+                        }
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Browse and Visual Search", systemImage: "photo.on.rectangle.angled")
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+
+                        LazyVGrid(columns: actionColumns, spacing: 10) {
+                            settingsAction("Pick Visual Query", systemImage: "photo.badge.plus") {
+                                vm.pickVisualQueryImage()
+                            }
+                            settingsAction("Paste Visual Query", systemImage: "doc.on.clipboard") {
+                                vm.pasteClipboardImageForSearch()
+                            }
+                            settingsAction("Paste and Ingest", systemImage: "square.and.arrow.down") {
+                                vm.pasteClipboardImageAndIngest()
+                            }
+                            settingsAction("All Indexed Files", systemImage: "doc.on.doc.fill") {
+                                vm.runAllFiles()
+                            }
+                            settingsAction("All Indexed Images", systemImage: "photo.stack") {
+                                vm.runAllPhotos()
+                            }
+                            settingsAction("Photo Clusters", systemImage: "square.grid.3x3.fill") {
+                                vm.openClusters()
+                            }
+                            settingsAction("Auto Cluster Photos", systemImage: "sparkles.rectangle.stack") {
+                                vm.runAutoCluster()
+                            }
+                            if vm.hasVisualQueryImage {
+                                settingsAction("Clear Visual Query", systemImage: "xmark.circle") {
+                                    vm.clearVisualQueryImage()
+                                }
+                            }
+                            if vm.hasAttachedChatImage {
+                                settingsAction("Clear Chat Image", systemImage: "xmark.circle") {
+                                    vm.clearAttachedChatImage()
+                                }
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("History", systemImage: "clock.arrow.circlepath")
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+
+                        LazyVGrid(columns: actionColumns, spacing: 10) {
+                            settingsAction("Clear Search History", systemImage: "trash") {
+                                vm.clearSearchHistory()
+                            }
+                            settingsAction("Clear Chat Conversation", systemImage: "bubble.left.and.bubble.right") {
+                                vm.clearChatConversation()
+                            }
+                        }
+                    }
 
                     Divider()
 
@@ -1676,27 +1766,40 @@ struct SettingsSheet: View {
 
                     Divider()
 
-                    // Actions
-                    VStack(spacing: 10) {
-                        Button {
-                            vm.runRescanAll()
-                        } label: {
-                            HStack {
-                                Image(systemName: "arrow.clockwise")
-                                Text("Rescan Now")
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Ingestion and Maintenance", systemImage: "externaldrive.badge.gearshape")
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+
+                        LazyVGrid(columns: actionColumns, spacing: 10) {
+                            settingsAction("Ingest File or Folder", systemImage: "folder.badge.plus") {
+                                vm.runIngestPath()
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding(10)
-                            .background(.blue.opacity(0.2), in: RoundedRectangle(cornerRadius: 10))
+                            settingsAction("Ingest Inbox", systemImage: "tray.and.arrow.down") {
+                                vm.runInboxIngest()
+                            }
+                            settingsAction("Rescan Changed", systemImage: "arrow.clockwise") {
+                                vm.runRescan()
+                            }
+                            settingsAction("Rescan Everything", systemImage: "arrow.triangle.2.circlepath") {
+                                vm.runRescanAll()
+                            }
+                            settingsAction("Safe Reprocess", systemImage: "checkmark.shield") {
+                                vm.runSafeReprocess()
+                            }
+                            settingsAction(
+                                "Emergency Kill Switch",
+                                systemImage: "power",
+                                role: .destructive
+                            ) {
+                                vm.runEmergencyMemoryKillSwitch()
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .disabled(vm.isBusy)
                     }
                 }
                 .padding(20)
             }
         }
-        .frame(width: 450, height: 550)
+        .frame(width: 540, height: 680)
         .background(.regularMaterial)
         .onAppear {
             vm.loadWatchedFolders()
@@ -2615,9 +2718,6 @@ struct ContentView: View {
                     .padding(20)
             }
         }
-        .sheet(isPresented: $vm.showSettings) {
-            SettingsSheet(vm: vm)
-        }
         .sheet(isPresented: $vm.showContextLens) {
             ContextLensSheet(vm: vm)
         }
@@ -2876,76 +2976,6 @@ struct ContentView: View {
                 }
             )
 
-            labeledIconMenu(
-                title: "Settings",
-                help: "Search and ingest settings",
-                content: {
-                // Mode
-                Picker("Mode", selection: $vm.searchMode) {
-                    ForEach(SearchMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-
-                Divider()
-
-                // Filters
-                Picker("Filter", selection: $vm.sourceFilter) {
-                    ForEach(SourceFilter.allCases) { f in
-                        Text(f.rawValue).tag(f)
-                    }
-                }
-                
-                Divider()
-                
-                // Sliders
-                Text("Top K: \(vm.topK)")
-                Stepper("Top K", value: $vm.topK, in: 1...50)
-                
-                Text("Min Score: \(String(format: "%.2f", vm.minScore))")
-                Slider(value: $vm.minScore, in: 0...1)
-
-                Divider()
-
-                // Actions
-                Button("Pick Visual Query Image") { vm.pickVisualQueryImage() }
-                Button("Paste Image as Visual Query") { vm.pasteClipboardImageForSearch() }
-                Button("Paste Image and Ingest") { vm.pasteClipboardImageAndIngest() }
-                Button("All Indexed Files") { vm.runAllFiles() }
-                Button("All Indexed Images") { vm.runAllPhotos() }
-                Button("Open Photo Clusters") { vm.openClusters() }
-                Button("Auto Cluster Photos") { vm.runAutoCluster() }
-                if vm.hasVisualQueryImage {
-                    Button("Clear Visual Query Image") { vm.clearVisualQueryImage() }
-                }
-                if vm.hasAttachedChatImage {
-                    Button("Clear Attached Chat Image") { vm.clearAttachedChatImage() }
-                }
-                Button("Clear Search History") { vm.clearSearchHistory() }
-                Button("Clear Chat Conversation") { vm.clearChatConversation() }
-
-                Divider()
-
-                Button("Ingest File/Folder") { vm.runIngestPath() }
-                Button("Ingest Inbox") { vm.runInboxIngest() }
-                Button("Rescan Changed") { vm.runRescan() }
-                Button("Safe Reprocess") { vm.runSafeReprocess() }
-                Button(role: .destructive) { vm.runEmergencyMemoryKillSwitch() } label: { Text("Emergency Kill Switch") }
-
-                Divider()
-
-                Button("Settings...") { vm.showSettings = true }
-                
-                },
-                label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(10)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-            )
-            
             labeledIconButton(
                 title: "Expand",
                 help: "Toggle Expanded Controls",
@@ -3438,7 +3468,7 @@ struct SmartStackUIApp: App {
         .windowResizability(.contentSize)
 
         Settings {
-            SettingsSheet(vm: vm, showsCloseButton: false)
+            SettingsSheet(vm: vm)
         }
 
         MenuBarExtra("Smart Stack", systemImage: "sparkles.rectangle.stack") {
